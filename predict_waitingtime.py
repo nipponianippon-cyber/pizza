@@ -28,39 +28,39 @@ LOCATION_DETAILS = {
     "段上(1~4)": {"zone": "Zone_B", "dist": 2.1},
     "千種": {"zone": "Zone_B", "dist": 2.3},
     "仁川": {"zone": "Zone_B", "dist": 2.5},
-    "仁川高台": {"zone": "Zone_B", "dist": 2.8},
-    "仁川高丸": {"zone": "Zone_B", "dist": 2.9},
+    "仁川高台": {"zone": "Zone_B", "dist": 1.3},
+    "仁川高丸": {"zone": "Zone_B", "dist": 1.6},
     "上甲東園": {"zone": "Zone_B", "dist": 2.2},
     "甲東園": {"zone": "Zone_B", "dist": 2.4},
-    "安倉西": {"zone": "Zone_B", "dist": 3.0},
-    "安倉中": {"zone": "Zone_B", "dist": 3.2},
-    "西野": {"zone": "Zone_B", "dist": 2.8},
-    "中野西": {"zone": "Zone_B", "dist": 3.1},
-    "中野北": {"zone": "Zone_B", "dist": 3.3},
-    "末広": {"zone": "Zone_B", "dist": 2.5},
+    "安倉西": {"zone": "Zone_B", "dist": 1.6},
+    "安倉中": {"zone": "Zone_B", "dist": 2.6},
+    "西野": {"zone": "Zone_B", "dist": 1.5},
+    "中野西": {"zone": "Zone_B", "dist": 2.4},
+    "中野北": {"zone": "Zone_B", "dist": 2.3},
+    "末広": {"zone": "Zone_B", "dist": 1.6},
     "中州": {"zone": "Zone_B", "dist": 1.8},
     "野上(1~3)": {"zone": "Zone_B", "dist": 2.0},
 
     # Zone_C (約4km圏内)
-    "仁川(5~6)": {"zone": "Zone_C", "dist": 3.8},
-    "上ヶ原": {"zone": "Zone_C", "dist": 4.2},
-    "上大市": {"zone": "Zone_C", "dist": 3.5},
-    "下大市": {"zone": "Zone_C", "dist": 3.6},
-    "段上(5~8)": {"zone": "Zone_C", "dist": 3.9},
-    "美座": {"zone": "Zone_C", "dist": 4.5},
-    "小浜": {"zone": "Zone_C", "dist": 3.8},
-    "弥生": {"zone": "Zone_C", "dist": 4.1},
-    "南口": {"zone": "Zone_C", "dist": 3.5},
-    "光が丘": {"zone": "Zone_C", "dist": 5.0},
-    "青葉台": {"zone": "Zone_C", "dist": 5.2},
-    "寿楽荘": {"zone": "Zone_C", "dist": 4.8},
-    "宝松苑": {"zone": "Zone_C", "dist": 4.3},
-    "逆瀬台": {"zone": "Zone_C", "dist": 4.6},
+    "仁川(5~6)": {"zone": "Zone_C", "dist": 2.2},
+    "上ヶ原": {"zone": "Zone_C", "dist": 3.0},
+    "上大市": {"zone": "Zone_C", "dist": 2.9},
+    "下大市": {"zone": "Zone_C", "dist": 3.5},
+    "段上(5~8)": {"zone": "Zone_C", "dist": 2.5},
+    "美座": {"zone": "Zone_C", "dist": 2.1},
+    "小浜": {"zone": "Zone_C", "dist": 3.5},
+    "弥生": {"zone": "Zone_C", "dist": 2.4},
+    "南口": {"zone": "Zone_C", "dist": 2.5},
+    "光が丘": {"zone": "Zone_C", "dist": 3.3},
+    "青葉台": {"zone": "Zone_C", "dist": 3.3},
+    "寿楽荘": {"zone": "Zone_C", "dist": 2.6},
+    "宝松苑": {"zone": "Zone_C", "dist": 2.6},
+    "逆瀬台": {"zone": "Zone_C", "dist": 3.0},
     "野上(4~6)": {"zone": "Zone_C", "dist": 3.5},
 
     # Zone_D (遠方)
-    "長寿が丘": {"zone": "Zone_D", "dist": 6.5},
-    "月見山": {"zone": "Zone_D", "dist": 7.0},
+    "長寿が丘": {"zone": "Zone_D", "dist": 4.4},
+    "月見山": {"zone": "Zone_D", "dist": 4.2},
 }
 
 WEATHER_CONFIG = {
@@ -96,97 +96,82 @@ def complete_order(order_id):
     st.session_state.orders = [o for o in st.session_state.orders if o['id'] != order_id]
 
 # ==========================================
-# 積み上げ計算ロジック
+# 積み上げ計算ロジック（滞在時間考慮版）
 # ==========================================
-
 def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, driver_count_func, weather):
     """
     注文を「時間順」に並べ替え、前から順番にオーブンに詰め込んでいく（スタック方式）
     driver_count_func: 時刻を渡すとその時間のドライバー数を返す関数
     """
     current_time = get_current_time()
-    w_conf = WEATHER_CONFIG[weather] # 天候設定を先に取得
+    w_conf = WEATHER_CONFIG[weather]
+    
+    # ★設定：配達先での平均滞在時間（分）
+    DELIVERY_STAY_MIN = 4.0
     
     # ====================================================
-    # 追加ロジック: 現在の注文状況から「平均1回転時間」を動的計算
+    # 1. 現在の注文状況から「平均1回転時間（サイクル）」を動的計算
     # ====================================================
     
-    # 1. 現在アクティブなデリバリー注文を抽出
     active_deliveries = [o for o in st.session_state.orders if o['type'] == 'Delivery']
     
-    # 2. もしデリバリー注文があれば、それぞれの往復時間を計算して平均をとる
     if active_deliveries:
         total_round_trip_min = 0
-        current_speed = 40.0 * w_conf["speed"] # 時速 (天候考慮)
+        current_speed = 17.25 * w_conf["speed"]
         
         for o in active_deliveries:
-            # 距離を取得
             loc_key = o['location']
-            dist = 1.0 # デフォルト
+            dist = 1.0
             if loc_key in LOCATION_DETAILS:
                 dist = LOCATION_DETAILS[loc_key]['dist']
             
-            # 片道時間(分) = (距離 / 時速) * 60
+            # 片道移動時間
             one_way_min = (dist / current_speed) * 60
             
-            # 往復時間 = 片道 * 2 (ユーザー要望の計算式)
-            # ※必要に応じてここに「受け渡し時間(+5分)」などを足しても良い
-            round_trip_min = one_way_min * 2
+            # ★修正箇所：往復時間 = (片道 * 2) + 現地滞在時間(4分)
+            round_trip_min = (one_way_min * 2) + DELIVERY_STAY_MIN
             
             total_round_trip_min += round_trip_min
             
-        # 平均サイクル時間を算出
         avg_cycle_time = total_round_trip_min / len(active_deliveries)
-        
-        # 安全策: 計算結果が極端に短くならないよう最低15分(近場往復)程度は確保
-        avg_cycle_time = max(15.0, avg_cycle_time)
+        # 最低保証（近場でも15分+4分はかかる想定）
+        avg_cycle_time = max(19.0, avg_cycle_time)
         
     else:
-        # デリバリー注文が1つもない場合は、デフォルトの30分を採用
-        avg_cycle_time = 30.0
+        # デリバリー注文がない場合：デフォルト30分 + 滞在4分
+        avg_cycle_time = 30.0 + DELIVERY_STAY_MIN
 
     # ====================================================
 
-    # 1. 全タスクのリスト化
+    # 2. 全タスクのリスト化
     all_tasks = []
-    
-    # 既存オーダー
     for o in st.session_state.orders:
         all_tasks.append({**o, "is_new": False})
-        
-    # 新規シミュレーション用オーダー
     for new_o in new_orders_list:
         sim_created = new_o.get('target_time') if new_o['is_reservation'] else current_time
         all_tasks.append({**new_o, "created_at": sim_created, "is_new": True})
 
-    # 2. 並び順の決定
+    # 3. 並び順の決定
     calc_tasks = []
     prep_delta = timedelta(minutes=prep_time)
-    
     for t in all_tasks:
         if t['is_reservation']:
             start_base = t['target_time'] - timedelta(minutes=30)
             priority_time = max(start_base, current_time)
         else:
             priority_time = t['created_at']
-            
-        calc_tasks.append({
-            **t,
-            "priority_time": priority_time
-        })
+        calc_tasks.append({**t, "priority_time": priority_time})
     
     calc_tasks.sort(key=lambda x: x['priority_time'])
 
-    # 3. オーブンの積み上げ計算
+    # 4. オーブンの積み上げ計算
     ovens = [current_time] * oven_count
     oven_interval = timedelta(minutes=1) 
     bake_duration = timedelta(minutes=bake_time)
 
     simulation_results = {}
-
     for task in calc_tasks:
         task_finish_time = current_time 
-        
         for _ in range(task['count']):
             earliest_idx = ovens.index(min(ovens))
             oven_ready_time = ovens[earliest_idx]
@@ -194,12 +179,10 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
             ovens[earliest_idx] = entry_time + oven_interval
             finish_time = entry_time + bake_duration
             task_finish_time = max(task_finish_time, finish_time)
-            
         simulation_results[task.get('id', 'SIMULATION')] = task_finish_time
 
-    # 4. 結果の返却
+    # 5. 結果の返却
     target_result = simulation_results.get('SIMULATION')
-    
     if not target_result:
         return None, None
 
@@ -210,36 +193,35 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     target_new = new_orders_list[0]
 
     if target_new['type'] == "Delivery":
-        
-        # --- (i) 個別距離の取得 ---
         loc_key = target_new['location']
         if loc_key in LOCATION_DETAILS:
             dist_km = LOCATION_DETAILS[loc_key]['dist']
         else:
             dist_km = 1.0 
 
-        speed = 40.0 * w_conf["speed"]
+        speed = 17.25 * w_conf["speed"]
         travel_min = (dist_km / speed) * 60
         
-        # --- (ii) 時間帯別のドライバー数を取得 ---
+        # ドライバー数と能力
         current_drivers = driver_count_func(total_finish_time)
-        
-        per_driver = math.floor(3 * w_conf["stack"])
+        per_driver = math.floor(1 * w_conf["stack"])
         if per_driver < 1: per_driver = 1
-        
         fleet_capa = current_drivers * per_driver
         if fleet_capa < 1: fleet_capa = 1 
 
-        # 配車待ち計算
+        # 配車待ち
         prior_deliveries = len([t for t in calc_tasks 
                                 if t['type'] == 'Delivery' 
                                 and t['priority_time'] <= target_new.get('priority_time', current_time)
                                 and not t.get('is_new')])
         
-        # ★変更箇所: 固定30分ではなく、計算した平均サイクル時間(avg_cycle_time)を使用
+        # ★ここで「滞在時間込みのサイクルタイム」を使って待ち時間を計算
         unit_wait = avg_cycle_time / fleet_capa
         wait_min = prior_deliveries * unit_wait
         
+        # ※お客様への到着時間には「自分の分の滞在時間」は足さない（到着＝ドア前）のが一般的ですが、
+        # もし「受け渡し完了時間」まで含めるなら travel_min に +4 してください。
+        # ここでは「到着時刻」として移動時間のみを足します。
         total_finish_time += timedelta(minutes=wait_min + travel_min)
         
         delivery_details = {
@@ -247,7 +229,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
             "wait": int(wait_min),
             "travel": int(travel_min),
             "drivers": current_drivers,
-            "avg_cycle": int(avg_cycle_time) # デバッグ用に平均サイクル時間も返す
+            "avg_cycle": int(avg_cycle_time)
         }
 
     return total_finish_time, delivery_details
@@ -308,15 +290,25 @@ with st.sidebar:
     active_dels = [o for o in st.session_state.orders if o['type'] == 'Delivery']
     if active_dels:
         total_mins = 0
-        w_speed = 40.0 * WEATHER_CONFIG[weather]["speed"]
+        w_speed = 17.25 * WEATHER_CONFIG[weather]["speed"]
+        
         for o in active_dels:
             d = LOCATION_DETAILS.get(o['location'], {"dist":1.0})['dist']
-            total_mins += ((d / w_speed) * 60) * 2
+            
+            # ★修正: 往復時間(移動) + 滞在時間(4分)
+            one_way = (d / w_speed) * 60
+            round_trip = (one_way * 2) + 4.0 
+            
+            total_mins += round_trip
+            
         avg_pac = int(total_mins / len(active_dels))
-        st.caption(f"平均往復: 約 {max(15, avg_pac)} 分 / 件")
-        st.caption(f"根拠: 実行中 {len(active_dels)}件の平均")
+        
+        # 最低保証も 15+4=19分 くらいに合わせるとベターです
+        st.caption(f"平均往復時間: 約 {max(19, avg_pac)} 分 / 件")
+        st.caption(f"{len(active_dels)} 件の平均")
     else:
-        st.caption("平均往復: 30 分 (デフォルト)")
+        # デフォルト表示も合わせる
+        st.caption("平均往復時間: 30分 (デフォルト)")
 
 # --- (iii) 未来の時間帯別 待ち時間予測ボード ---
 st.markdown("### 予測待ち時間")
