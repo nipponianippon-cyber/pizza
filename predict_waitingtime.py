@@ -6,7 +6,7 @@ from datetime import timedelta
 import uuid
 
 # ==========================================
-# 1. 設定・マスタデータ
+# 設定・マスタデータ
 # ==========================================
 
 ZONE_CONFIG = {
@@ -40,7 +40,7 @@ WEATHER_CONFIG = {
 }
 
 # ==========================================
-# 2. セッション状態管理
+# セッション状態管理
 # ==========================================
 if 'orders' not in st.session_state:
     st.session_state.orders = []
@@ -67,7 +67,7 @@ def complete_order(order_id):
     st.session_state.orders = [o for o in st.session_state.orders if o['id'] != order_id]
 
 # ==========================================
-# 3. 積み上げ計算ロジック（予約考慮版）
+# 積み上げ計算ロジック（予約考慮版）
 # ==========================================
 
 def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, driver_count, weather):
@@ -181,7 +181,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
 # ==========================================
 
 st.set_page_config(page_title="Pizza Wait Time", layout="wide")
-st.title("🍕 Pizza Stack Manager")
+st.title("ちんぽ")
 
 # サイドバー設定
 with st.sidebar:
@@ -223,15 +223,13 @@ announce_del = max(30, del_wait_min)
 
 
 # --- 案内表示エリア（最上部） ---
-st.markdown("### 📢 現在のお客様へのご案内時間")
+st.markdown("### waiting_time")
 # 目立つように表示
 metric_col1, metric_col2, metric_col3 = st.columns([1, 1, 2])
 with metric_col1:
-    st.container(border=True).metric("🥡 テイクアウト", f"{announce_to} 分", help=f"計算値: {to_wait_min}分 / 最低保証: 15分")
+    st.container(border=True).metric("Takeout", f"{announce_to} min", help=f"計算値: {to_wait_min}分 / 最低保証: 15分")
 with metric_col2:
-    st.container(border=True).metric("🛵 デリバリー", f"{announce_del} 分前後", help=f"計算値: {del_wait_min}分 / 最低保証: 30分")
-with metric_col3:
-    st.info("※上記はピザ1枚の標準的な待ち時間です。\nスタック状況により自動変動します。")
+    st.container(border=True).metric("Delivery", f"{announce_del} min", help=f"計算値: {del_wait_min}分 / 最低保証: 30分")
 
 st.divider()
 
@@ -240,10 +238,10 @@ st.divider()
 col_main, col_list = st.columns([1.2, 1.5])
 
 with col_main:
-    st.subheader("📞 新規注文入力")
+    st.subheader("新規注文入力")
     
     with st.container(border=True):
-        order_mode = st.radio("受付タイプ", ["今すぐ注文", "予約注文"], horizontal=True)
+        order_mode = st.radio("type", ["now", "reservation"], horizontal=True)
         
         target_dt = current_dt
         
@@ -283,9 +281,9 @@ with col_main:
             if finish_dt <= target_dt:
                 st.success("予約時刻に対し、間に合います。")
             else:
-                st.error("⚠️ 予約時刻に対し遅延が発生する可能性があります。")
+                st.error("予約時刻に対し遅延が発生する可能性があります。")
 
-        if st.button("注文を追加（スタック）", type="primary", use_container_width=True):
+        if st.button("Add Order", type="primary", use_container_width=True):
             add_order(order_type, count, loc, 
                       note if order_type=="Takeout" else f"配送: {loc}", 
                       target_dt, (order_mode == "予約注文"))
@@ -293,7 +291,7 @@ with col_main:
             st.rerun()
 
 with col_list:
-    st.subheader("📋 スタックされたオーダー")
+    st.subheader("Order")
     
     if st.session_state.orders:
         orders = st.session_state.orders
@@ -320,4 +318,4 @@ with col_list:
                     complete_order(o['id'])
                     st.rerun()
     else:
-        st.info("現在オーダーはありません。")
+        st.info("no data")
