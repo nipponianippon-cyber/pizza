@@ -271,22 +271,41 @@ with st.sidebar:
 
 # --- (iii) 未来の時間帯別 待ち時間予測ボード ---
 st.markdown("### 📊 時間帯別 待ち時間目安 (デリバリー)")
-st.caption("現在の注文状況と、各時間のシフト人数から逆算した目安")
 
-cols = st.columns(6)
+# 現在時刻を取得
 current_h = get_current_time().hour
-start_h = max(11, current_h)
-end_h = min(22, start_h + 5) # 向こう5時間分
 
-for i, h in enumerate(range(start_h, end_h + 1)):
-    # その時間の仮注文データ
+# スライダーのデフォルト値を計算（現在〜5時間後、ただし範囲内に収める）
+default_start = max(11, current_h)
+default_end = min(22, default_start + 5)
+
+# 1. 範囲選択スライダー
+selected_range = st.slider(
+    "確認したい時間帯の範囲を指定",
+    min_value=11, 
+    max_value=22, 
+    value=(default_start, default_end), # (開始, 終了) の初期値
+    format="%d時"
+)
+
+start_view, end_view = selected_range
+
+# 2. 選択された範囲でループ表示
+# カラム数は6つ（6時間を超える範囲を選択した場合は、次の行に折り返されます）
+cols = st.columns(6)
+
+count = 0
+for h in range(start_view, end_view + 1):
+    # その時間の仮注文データを作成
     target_dt = get_current_time().replace(hour=h, minute=0)
+    
+    # 過去の時間を選んだ場合は、現在時刻として計算（過去の予測はできないため）
     if target_dt < get_current_time():
-        target_dt = get_current_time() # 過去なら現在
+        target_dt = get_current_time()
 
     dummy_del = {
         "type": "Delivery", "count": 1, "location": "鹿塩", # 標準距離
-        "target_time": target_dt, "is_reservation": True # その時間に予約したとして計算
+        "target_time": target_dt, "is_reservation": True
     }
     
     fin_dt, dets = calculate_stack_schedule(
@@ -295,19 +314,25 @@ for i, h in enumerate(range(start_h, end_h + 1)):
     
     # 待ち時間（分）
     wait_m = math.ceil((fin_dt - target_dt).total_seconds() / 60)
-    # 最低保証30分
-    disp_wait = max(30, wait_m)
+    disp_wait = max(30, wait_m) # 最低保証30分
     
-    # ドライバー数
+    # その時間のドライバー数
     d_num = get_drivers_at_hour(h)
     
-    # 色分け
-    bg_color = "green"
-    if disp_wait > 45: bg_color = "orange"
-    if disp_wait > 60: bg_color = "red"
+    # 状況に応じた色文字（Streamlitのmetricは色変更できないため、delta機能で簡易表現）
+    # 混雑度合いを視覚化
+    delta_color = "normal"
+    if disp_wait > 60: delta_color = "inverse" # 赤っぽく目立たせる意図
     
-    with cols[i % 6]:
-        st.metric(f"{h}:00 入電", f"{disp_wait}分", f"人: {d_num}名")
+    # 表示（6列で折り返し）
+    with cols[count % 6]:
+        st.metric(
+            label=f"{h}:00 受注", 
+            value=f"{disp_wait}分", 
+            delta=f"{d_num}人体制",
+            delta_color=delta_color
+        )
+    count += 1
 
 
 st.divider()
