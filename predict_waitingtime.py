@@ -223,7 +223,7 @@ announce_del = max(30, del_wait_min)
 
 
 # --- 案内表示エリア（最上部） ---
-st.markdown("### waiting_time")
+st.markdown("### 待ち時間")
 # 目立つように表示
 metric_col1, metric_col2, metric_col3 = st.columns([1, 1, 2])
 with metric_col1:
@@ -241,7 +241,7 @@ with col_main:
     st.subheader("新規注文入力")
     
     with st.container(border=True):
-        order_mode = st.radio("type", ["now", "reservation"], horizontal=True)
+        order_mode = st.radio("受付タイプ", ["今すぐ", "予約"], horizontal=True)
         
         target_dt = current_dt
         
@@ -291,7 +291,7 @@ with col_main:
             st.rerun()
 
 with col_list:
-    st.subheader("Order")
+    st.subheader("注文")
     
     if st.session_state.orders:
         orders = st.session_state.orders
