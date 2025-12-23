@@ -65,7 +65,7 @@ WEATHER_CONFIG = {
 }
 
 # 平均時速(km/h) ※信号待ち等含む実効速度
-BASE_SPEED_KMH = 30.0
+BASE_SPEED_KMH = 17.25
 
 # ==========================================
 # 2. セッション状態管理
@@ -204,7 +204,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
         
         # ドライバー数と能力（焼き上がり時点のシフト人数を参照）
         current_drivers = driver_count_func(total_finish_time)
-        per_driver = math.floor(3 * w_conf["stack"])
+        per_driver = math.floor(1 * w_conf["stack"])
         if per_driver < 1: per_driver = 1
         
         fleet_capa = current_drivers * per_driver
