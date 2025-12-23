@@ -87,23 +87,17 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     for new_o in new_orders_list:
         all_tasks.append({**new_o, "created_at": current_time, "is_new": True})
 
-    # 2. 並び順の決定（ここが重要）
-    # ルール: 
-    # - 予約注文は「調理開始希望時刻（ターゲット - 準備時間）」を基準にする
-    # - 今すぐ注文は「受注時刻（現在）」を基準にする
-    # これらを混ぜて、時間が早い順にソートする
-    
+    # 2. 並び順の決定
     calc_tasks = []
     prep_delta = timedelta(minutes=prep_time)
     
     for t in all_tasks:
         if t['is_reservation']:
-            # 予約：希望時刻の30分前には焼き始めたい（余裕枠）
-            # ただし、過去の場合は現在時刻にする
+            # 予約：希望時刻の30分前基準
             start_base = t['target_time'] - timedelta(minutes=30)
             priority_time = max(start_base, current_time)
         else:
-            # 今すぐ：受注時刻（現在）
+            # 今すぐ：受注時刻基準
             priority_time = t['created_at']
             
         calc_tasks.append({
@@ -115,71 +109,62 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     calc_tasks.sort(key=lambda x: x['priority_time'])
 
     # 3. オーブンの積み上げ計算
-    # 各オーブンが「いつ空くか」を持つリスト
     ovens = [current_time] * oven_count
-    oven_interval = timedelta(minutes=1) # 投入間隔
+    oven_interval = timedelta(minutes=1) 
     bake_duration = timedelta(minutes=bake_time)
 
     # 結果格納用
     simulation_results = {}
 
     for task in calc_tasks:
-        task_finish_time = current_time # 初期化
+        task_finish_time = current_time 
         
-        # ピザ枚数分ループ
         for _ in range(task['count']):
-            # 一番早く空くオーブンを探す
             earliest_idx = ovens.index(min(ovens))
             oven_ready_time = ovens[earliest_idx]
             
-            # 投入時刻の決定
-            # 「オーブンの空き」と「その注文の着手可能時刻(priority_time + 準備)」の遅い方
-            # これにより、予約時間までオーブンを「空けて待つ」挙動や、
-            # 予約の前に隙間があれば「今すぐ注文」をねじ込む挙動が自動計算される
-            
             entry_time = max(oven_ready_time, task['priority_time'] + prep_delta)
             
-            # オーブン予定更新
             ovens[earliest_idx] = entry_time + oven_interval
             
-            # 焼き上がり時刻
             finish_time = entry_time + bake_duration
             task_finish_time = max(task_finish_time, finish_time)
             
         simulation_results[task.get('id', 'SIMULATION')] = task_finish_time
 
     # 4. 結果の返却（新規注文分のみ）
-    # 新規注文が複数ある場合は「最後の注文」の結果を返す仕様とする
     target_result = simulation_results.get('SIMULATION')
     
     if not target_result:
-        # 新規注文がない場合（リスト表示用など）はNone
         return None, None
 
     # デリバリー計算（簡易版）
     delivery_details = {}
     total_finish_time = target_result
     
-    # 今回計算対象の新規オーダー情報
     target_new = new_orders_list[0]
 
     if target_new['type'] == "Delivery":
         w_conf = WEATHER_CONFIG[weather]
-        zone_id = LOCATION_MAP[target_new['location']]
-        dist_km = ZONE_CONFIG[zone_id]['dist_km']
-        
-        # 移動
+        # デリバリーの場合、指定場所までの距離計算
+        # ※案内時間計算時は、標準的な場所（Zone_Aなど）を使用する想定
+        loc_key = target_new['location']
+        if loc_key in LOCATION_MAP:
+            zone_id = LOCATION_MAP[loc_key]
+            dist_km = ZONE_CONFIG[zone_id]['dist_km']
+        else:
+            dist_km = 1.0 # デフォルト
+
         speed = 40.0 * w_conf["speed"]
         travel_min = (dist_km / speed) * 60
         
-        # 配車待ち（簡易スタック計算）
-        # 「自分より前にいるデリバリー注文」の数 × 5分
+        # 配車待ち
         prior_deliveries = len([t for t in calc_tasks 
                                 if t['type'] == 'Delivery' 
                                 and t['priority_time'] <= target_new.get('priority_time', current_time)
                                 and not t.get('is_new')])
         
-        wait_min = prior_deliveries * 5 # 係数
+        wait_min = prior_deliveries * 5 
         
         total_finish_time += timedelta(minutes=wait_min + travel_min)
         
@@ -195,8 +180,8 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
 # 4. UI構築
 # ==========================================
 
-st.set_page_config(page_title="Pizza Stack Manager", layout="wide")
-st.title("🍕 Pizza Stack Manager (積み上げ計算版)")
+st.set_page_config(page_title="Pizza Wait Time", layout="wide")
+st.title("🍕 Pizza Stack Manager")
 
 # サイドバー設定
 with st.sidebar:
@@ -208,16 +193,58 @@ with st.sidebar:
     prep_time = st.number_input("準備時間(分)", 5, 60, 15)
     bake_time = st.number_input("焼成時間(分)", 3.0, 15.0, 6.5)
 
-# メインレイアウト
+# --- 【追加ロジック】現在の客向け案内時間の計算 ---
+current_dt = get_current_time()
+
+# 1. 仮想テイクアウト注文（1枚）でシミュレーション
+dummy_takeout = {
+    "type": "Takeout", "count": 1, "location": "", 
+    "target_time": current_dt, "is_reservation": False
+}
+to_finish, _ = calculate_stack_schedule(
+    [dummy_takeout], oven_count, bake_time, prep_time, driver_count, weather
+)
+# 現在時刻との差分（分）
+to_wait_min = math.ceil((to_finish - current_dt).total_seconds() / 60)
+# ★デフォルト15分未満なら15分にする
+announce_to = max(15, to_wait_min)
+
+# 2. 仮想デリバリー注文（1枚・標準エリア鹿塩）でシミュレーション
+dummy_delivery = {
+    "type": "Delivery", "count": 1, "location": "鹿塩", 
+    "target_time": current_dt, "is_reservation": False
+}
+del_finish, _ = calculate_stack_schedule(
+    [dummy_delivery], oven_count, bake_time, prep_time, driver_count, weather
+)
+del_wait_min = math.ceil((del_finish - current_dt).total_seconds() / 60)
+# ★デフォルト30分未満なら30分にする
+announce_del = max(30, del_wait_min)
+
+
+# --- 案内表示エリア（最上部） ---
+st.markdown("### 📢 現在のお客様へのご案内時間")
+# 目立つように表示
+metric_col1, metric_col2, metric_col3 = st.columns([1, 1, 2])
+with metric_col1:
+    st.container(border=True).metric("🥡 テイクアウト", f"{announce_to} 分", help=f"計算値: {to_wait_min}分 / 最低保証: 15分")
+with metric_col2:
+    st.container(border=True).metric("🛵 デリバリー", f"{announce_del} 分前後", help=f"計算値: {del_wait_min}分 / 最低保証: 30分")
+with metric_col3:
+    st.info("※上記はピザ1枚の標準的な待ち時間です。\nスタック状況により自動変動します。")
+
+st.divider()
+
+# --- 以降、通常の注文入力画面 ---
+
 col_main, col_list = st.columns([1.2, 1.5])
 
 with col_main:
-    st.subheader("📞 注文入力")
+    st.subheader("📞 新規注文入力")
     
     with st.container(border=True):
         order_mode = st.radio("受付タイプ", ["今すぐ注文", "予約注文"], horizontal=True)
         
-        current_dt = get_current_time()
         target_dt = current_dt
         
         if order_mode == "予約注文":
@@ -236,7 +263,7 @@ with col_main:
         else:
             note = c2.text_input("顧客名/メモ", "様")
 
-        # --- スタック計算実行 ---
+        # --- 個別注文のシミュレーション（確認用） ---
         sim_order = {
             "type": order_type, 
             "count": count, 
@@ -248,25 +275,15 @@ with col_main:
         finish_dt, details = calculate_stack_schedule(
             [sim_order], oven_count, bake_time, prep_time, driver_count, weather
         )
-
-        st.divider()
-        st.markdown("##### 🕒 計算結果")
         
-        diff_min = int((finish_dt - current_dt).total_seconds() / 60)
+        # 個別見積もりの表示
+        st.markdown(f"**この注文の完了予定:** `{finish_dt.strftime('%H:%M')}`")
         
-        if order_mode == "今すぐ注文":
-            st.metric("提供可能時刻", f"{finish_dt.strftime('%H:%M')}", f"待ち時間: 約{diff_min}分")
-        else:
-            # 予約判定
+        if order_mode == "予約注文":
             if finish_dt <= target_dt:
-                st.success(f"✅ 予約OK (完了予定: {finish_dt.strftime('%H:%M')})")
+                st.success("予約時刻に対し、間に合います。")
             else:
-                delay = int((finish_dt - target_dt).total_seconds()/60)
-                st.error(f"⚠️ 予約時刻に間に合いません ({delay}分遅延)")
-                st.metric("最短提供", f"{finish_dt.strftime('%H:%M')}")
-        
-        if details:
-             st.caption(f"内訳: 焼き上がり{details['baked']} + 配車待ち{details['wait']}分 + 移動{details['travel']}分")
+                st.error("⚠️ 予約時刻に対し遅延が発生する可能性があります。")
 
         if st.button("注文を追加（スタック）", type="primary", use_container_width=True):
             add_order(order_type, count, loc, 
@@ -275,22 +292,20 @@ with col_main:
             st.success("注文をスタックに追加しました")
             st.rerun()
 
-    # --- 簡易混雑状況 ---
-    st.subheader("📊 現在のバックログ")
-    orders = st.session_state.orders
-    total_pizzas = sum(o['count'] for o in orders)
-    st.info(f"待機中の注文: {len(orders)}件 / ピザ残数: {total_pizzas}枚")
-
 with col_list:
     st.subheader("📋 スタックされたオーダー")
+    
     if st.session_state.orders:
-        # 時間順（優先度順）に並べ替えて表示
-        # 簡易的にpriority_timeを再計算してソート
+        orders = st.session_state.orders
+        total_pizzas = sum(o['count'] for o in orders)
+        st.caption(f"待機注文: {len(orders)}件 / バックログ残枚数: {total_pizzas}枚")
+        
+        # 表示用にソート
         display_list = []
-        for o in st.session_state.orders:
+        for o in orders:
             p_time = o['created_at']
             if o['is_reservation']:
-                p_time = max(o['target_time'] - timedelta(minutes=30), get_current_time())
+                p_time = max(o['target_time'] - timedelta(minutes=30), current_dt)
             display_list.append({**o, "sort_key": p_time})
             
         display_list.sort(key=lambda x: x['sort_key'])
@@ -300,9 +315,9 @@ with col_list:
             time_str = o['target_time'].strftime('%H:%M') if o['is_reservation'] else o['created_at'].strftime('%H:%M')
             
             with st.expander(f"{icon} {time_str} | {o['count']}枚 ({o['type']})"):
-                st.write(f"メモ/場所: {o['note'] if o['type']=='Takeout' else o['location']}")
+                st.write(f"内容: {o['note'] if o['type']=='Takeout' else o['location']}")
                 if st.button("完了・消込", key=o['id']):
                     complete_order(o['id'])
                     st.rerun()
     else:
-        st.write("現在オーダーはありません")
+        st.info("現在オーダーはありません。")
