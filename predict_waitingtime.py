@@ -69,7 +69,7 @@ WEATHER_CONFIG = {
 }
 
 # ==========================================
-# 2. セッション状態管理
+# セッション状態管理
 # ==========================================
 if 'orders' not in st.session_state:
     st.session_state.orders = []
@@ -96,7 +96,7 @@ def complete_order(order_id):
     st.session_state.orders = [o for o in st.session_state.orders if o['id'] != order_id]
 
 # ==========================================
-# 3. 積み上げ計算ロジック（シフト考慮版）
+# 積み上げ計算ロジック
 # ==========================================
 
 def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, driver_count_func, weather):
@@ -105,7 +105,48 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     driver_count_func: 時刻を渡すとその時間のドライバー数を返す関数
     """
     current_time = get_current_time()
+    w_conf = WEATHER_CONFIG[weather] # 天候設定を先に取得
     
+    # ====================================================
+    # 追加ロジック: 現在の注文状況から「平均1回転時間」を動的計算
+    # ====================================================
+    
+    # 1. 現在アクティブなデリバリー注文を抽出
+    active_deliveries = [o for o in st.session_state.orders if o['type'] == 'Delivery']
+    
+    # 2. もしデリバリー注文があれば、それぞれの往復時間を計算して平均をとる
+    if active_deliveries:
+        total_round_trip_min = 0
+        current_speed = 40.0 * w_conf["speed"] # 時速 (天候考慮)
+        
+        for o in active_deliveries:
+            # 距離を取得
+            loc_key = o['location']
+            dist = 1.0 # デフォルト
+            if loc_key in LOCATION_DETAILS:
+                dist = LOCATION_DETAILS[loc_key]['dist']
+            
+            # 片道時間(分) = (距離 / 時速) * 60
+            one_way_min = (dist / current_speed) * 60
+            
+            # 往復時間 = 片道 * 2 (ユーザー要望の計算式)
+            # ※必要に応じてここに「受け渡し時間(+5分)」などを足しても良い
+            round_trip_min = one_way_min * 2
+            
+            total_round_trip_min += round_trip_min
+            
+        # 平均サイクル時間を算出
+        avg_cycle_time = total_round_trip_min / len(active_deliveries)
+        
+        # 安全策: 計算結果が極端に短くならないよう最低15分(近場往復)程度は確保
+        avg_cycle_time = max(15.0, avg_cycle_time)
+        
+    else:
+        # デリバリー注文が1つもない場合は、デフォルトの30分を採用
+        avg_cycle_time = 30.0
+
+    # ====================================================
+
     # 1. 全タスクのリスト化
     all_tasks = []
     
@@ -115,7 +156,6 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
         
     # 新規シミュレーション用オーダー
     for new_o in new_orders_list:
-        # 新規注文の作成時刻は、予約ならその時間、今すぐなら現在
         sim_created = new_o.get('target_time') if new_o['is_reservation'] else current_time
         all_tasks.append({**new_o, "created_at": sim_created, "is_new": True})
 
@@ -150,11 +190,8 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
         for _ in range(task['count']):
             earliest_idx = ovens.index(min(ovens))
             oven_ready_time = ovens[earliest_idx]
-            
             entry_time = max(oven_ready_time, task['priority_time'] + prep_delta)
-            
             ovens[earliest_idx] = entry_time + oven_interval
-            
             finish_time = entry_time + bake_duration
             task_finish_time = max(task_finish_time, finish_time)
             
@@ -173,39 +210,34 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     target_new = new_orders_list[0]
 
     if target_new['type'] == "Delivery":
-        w_conf = WEATHER_CONFIG[weather]
         
         # --- (i) 個別距離の取得 ---
         loc_key = target_new['location']
         if loc_key in LOCATION_DETAILS:
             dist_km = LOCATION_DETAILS[loc_key]['dist']
         else:
-            dist_km = 1.0 # 未登録時のデフォルト
+            dist_km = 1.0 
 
         speed = 40.0 * w_conf["speed"]
         travel_min = (dist_km / speed) * 60
         
-        # --- (ii) 時間帯別のドライバー数を取得して能力計算 ---
-        # そのタスクの焼き上がり予定時刻時点でのドライバー数を使う
+        # --- (ii) 時間帯別のドライバー数を取得 ---
         current_drivers = driver_count_func(total_finish_time)
         
-        # ドライバー能力 (スタッキング係数)
         per_driver = math.floor(3 * w_conf["stack"])
         if per_driver < 1: per_driver = 1
         
         fleet_capa = current_drivers * per_driver
-        if fleet_capa < 1: fleet_capa = 1 # 安全策
+        if fleet_capa < 1: fleet_capa = 1 
 
         # 配車待ち計算
-        # 自分より「前に」あるデリバリー注文数をカウント
         prior_deliveries = len([t for t in calc_tasks 
                                 if t['type'] == 'Delivery' 
                                 and t['priority_time'] <= target_new.get('priority_time', current_time)
                                 and not t.get('is_new')])
         
-        # 簡易計算: (前の件数 / 1回の配送能力) * 1配送の時間(30分)
-        # ※シンプル化のため、前の件数1件につき「(30/能力)分」待つとする
-        unit_wait = 30.0 / fleet_capa
+        # ★変更箇所: 固定30分ではなく、計算した平均サイクル時間(avg_cycle_time)を使用
+        unit_wait = avg_cycle_time / fleet_capa
         wait_min = prior_deliveries * unit_wait
         
         total_finish_time += timedelta(minutes=wait_min + travel_min)
@@ -214,17 +246,18 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
             "baked": target_result.strftime("%H:%M"),
             "wait": int(wait_min),
             "travel": int(travel_min),
-            "drivers": current_drivers
+            "drivers": current_drivers,
+            "avg_cycle": int(avg_cycle_time) # デバッグ用に平均サイクル時間も返す
         }
 
     return total_finish_time, delivery_details
 
 # ==========================================
-# 4. UI構築
+# UI構築
 # ==========================================
 
 st.set_page_config(page_title="Pizza Wait Time Pro", layout="wide")
-st.title("おいしい")
+st.title("")
 
 # --- サイドバー設定（ドライバーシフト表） ---
 with st.sidebar:
@@ -266,6 +299,24 @@ with st.sidebar:
         if not row.empty:
             return int(row.iloc[0]["Drivers"])
         return 1
+    
+    # サイドバーの最後に追加
+    st.divider()
+    st.markdown("**現在の配送ペース**")
+    
+    # 実際の計算ロジックと同じ計算をして表示
+    active_dels = [o for o in st.session_state.orders if o['type'] == 'Delivery']
+    if active_dels:
+        total_mins = 0
+        w_speed = 40.0 * WEATHER_CONFIG[weather]["speed"]
+        for o in active_dels:
+            d = LOCATION_DETAILS.get(o['location'], {"dist":1.0})['dist']
+            total_mins += ((d / w_speed) * 60) * 2
+        avg_pac = int(total_mins / len(active_dels))
+        st.caption(f"平均往復: 約 {max(15, avg_pac)} 分 / 件")
+        st.caption(f"根拠: 実行中 {len(active_dels)}件の平均")
+    else:
+        st.caption("平均往復: 30 分 (デフォルト)")
 
 # --- (iii) 未来の時間帯別 待ち時間予測ボード ---
 st.markdown("### 予測待ち時間")
