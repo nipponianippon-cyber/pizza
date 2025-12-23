@@ -325,9 +325,9 @@ for h in range(start_view, end_view + 1):
     # 表示（6列で折り返し）
     with cols[count % 6]:
         st.metric(
-            label=f"{h}:00 受注", 
-            value=f"{disp_wait}分", 
-            delta=f"{d_num}人体制",
+            label=f"{h}:00", 
+            value=f"{disp_wait}min", 
+            delta=f"{d_num}人",
             delta_color=delta_color
         )
     count += 1
