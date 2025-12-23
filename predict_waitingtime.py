@@ -455,10 +455,10 @@ with col_list:
         display_list.sort(key=lambda x: x['sort_key'])
         
         for o in display_list:
-            icon = "📅" if o['is_reservation'] else "⚡"
-            time_str = o['target_time'].strftime('%H:%M') if o['is_reservation'] else o['created_at'].strftime('%H:%M')
             
-            with st.expander(f"{icon} {time_str} | {o['count']}枚 ({o['type']})"):
+            time_str = o['target_time'].strftime('%H:%M') if o['is_reservation'] else o['created_at'].strftime('%H:%M')
+            #icon = "📅" if o['is_reservation'] else "⚡"
+            with st.expander(f"{time_str} | {o['count']}枚 ({o['type']})"):
                 st.write(f"内容: {o['note'] if o['type']=='Takeout' else o['location']}")
                 if st.button("完了", key=o['id']):
                     complete_order(o['id'])
