@@ -65,8 +65,7 @@ LOCATION_DETAILS = {
 
 WEATHER_CONFIG = {
     "晴": {"speed": 1.0, "stack": 1.0},
-    "雨": {"speed": 0.8, "stack": 0.8},
-    "雪": {"speed": 0.5, "stack": 0.5}
+    "雨": {"speed": 0.8, "stack": 0.8}
 }
 
 # ==========================================
@@ -225,19 +224,18 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
 # ==========================================
 
 st.set_page_config(page_title="Pizza Wait Time Pro", layout="wide")
-st.title("🍕 Pizza Delivery Manager")
+st.title("おいしい")
 
 # --- サイドバー設定（ドライバーシフト表） ---
 with st.sidebar:
     st.header("環境設定")
-    weather = st.radio("天候", ["晴", "雨", "雪"], horizontal=True)
+    weather = st.radio("天候", ["晴", "雨"], horizontal=True)
     oven_count = st.slider("オーブン数", 1, 5, 2)
     prep_time = st.number_input("準備時間(分)", 5, 60, 15)
     bake_time = st.number_input("焼成時間(分)", 3.0, 15.0, 6.5)
     
     st.divider()
-    st.subheader("🛵 配達員シフト")
-    st.caption("時間帯ごとの人数を入力")
+    st.subheader("配達員")
     
     # デフォルトのシフトデータ
     default_schedule = pd.DataFrame({
@@ -270,7 +268,7 @@ with st.sidebar:
         return 1
 
 # --- (iii) 未来の時間帯別 待ち時間予測ボード ---
-st.markdown("### 📊 時間帯別 待ち時間目安 (デリバリー)")
+st.markdown("### 予測待ち時間")
 
 # 現在時刻を取得
 current_h = get_current_time().hour
@@ -281,7 +279,7 @@ default_end = min(22, default_start + 5)
 
 # 1. 範囲選択スライダー
 selected_range = st.slider(
-    "確認したい時間帯の範囲を指定",
+    "",
     min_value=11, 
     max_value=22, 
     value=(default_start, default_end), # (開始, 終了) の初期値
@@ -342,7 +340,7 @@ st.divider()
 col_main, col_list = st.columns([1.2, 1.5])
 
 with col_main:
-    st.subheader("📞 新規注文入力")
+    st.subheader("新規注文入力")
     
     with st.container(border=True):
         order_mode = st.radio("受付タイプ", ["今すぐ", "予約"], horizontal=True)
@@ -405,7 +403,7 @@ with col_main:
             st.rerun()
 
 with col_list:
-    st.subheader("現在のオーダー")
+    st.subheader("現在の注文")
     
     if st.session_state.orders:
         orders = st.session_state.orders
