@@ -6,10 +6,10 @@ from datetime import timedelta
 import uuid
 
 # ==========================================
-# 1. 設定・マスタデータ
+# 1. config, master
 # ==========================================
 
-# 距離マスタ
+# 距離master
 LOCATION_DETAILS = {
     # Zone_A
     "鹿塩": {"zone": "Zone_A", "dist": 0.8},
@@ -64,7 +64,7 @@ WEATHER_CONFIG = {
     "雨": {"speed": 0.8, "stack": 0.8}
 }
 
-# 平均時速(km/h) ※信号待ち等含む実効速度
+# 平均時速(km/h)
 BASE_SPEED_KMH = 17.25
 
 # ==========================================
@@ -95,7 +95,7 @@ def complete_order(order_id):
     st.session_state.orders = [o for o in st.session_state.orders if o['id'] != order_id]
 
 # ==========================================
-# 3. 積み上げ計算ロジック（滞在時間考慮版）
+# 3. スタッキング計算
 # ==========================================
 def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, driver_count_func, weather):
     """
@@ -104,7 +104,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
     current_time = get_current_time()
     w_conf = WEATHER_CONFIG[weather]
     
-    # ★設定：配達先での平均滞在時間（分）
+    # 配達先での平均滞在時間（分）
     DELIVERY_STAY_MIN = 4.0
     
     # ----------------------------------------------------
@@ -123,7 +123,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
             # 片道移動時間
             one_way_min = (dist / current_speed) * 60
             
-            # ★修正: 往復時間 = (片道 * 2) + 現地滞在時間(4分)
+            # 修正: 往復時間 = (片道 * 2) + 現地滞在時間(4分)
             round_trip_min = (one_way_min * 2) + DELIVERY_STAY_MIN
             total_round_trip_min += round_trip_min
             
@@ -216,7 +216,7 @@ def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, 
                                 and t['priority_time'] <= target_new.get('priority_time', current_time)
                                 and not t.get('is_new')])
         
-        # ★計算ロジック：平均サイクルタイムを使って待ち時間を算出
+        # 平均サイクルタイムを使って待ち時間を算出
         unit_wait = avg_cycle_time / fleet_capa
         wait_min = prior_deliveries * unit_wait
         
@@ -353,7 +353,7 @@ for h in range(start_view, end_view + 1):
         # 色分け
         delta_color = "normal"
         if disp_wait > 60: 
-            delta_color = "inverse" # 赤っぽく
+            delta_color = "inverse"
         
         with cols[count % 6]:
             st.metric(
