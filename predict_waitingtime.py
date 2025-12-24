@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # ==========================================
-# 0. マスタデータ設定
+# Master
 # ==========================================
 LOCATION_MASTER = {
     "A地区 (近隣)": 15,
@@ -14,13 +14,13 @@ LOCATION_MASTER = {
 }
 
 # ==========================================
-# 1. セッション状態の初期化
+# Init Session
 # ==========================================
 if 'orders' not in st.session_state:
     st.session_state.orders = []
 
 # ==========================================
-# 2. 計算ロジック (回転数を廃止し、平均ペース計算へ変更)
+# Calculate
 # ==========================================
 def calculate_wait_time(orders_list, driver_count):
     if not orders_list:
@@ -50,13 +50,13 @@ def calculate_wait_time(orders_list, driver_count):
     return int(final_time), avg_round_trip, waiting_factor, raw_time
 
 # ==========================================
-# 3. UI構築
+# UI
 # ==========================================
-st.title("🛵 リアルタイム待ち時間計算")
+st.title("")
 
 # --- サイドバー：入力エリア ---
 with st.sidebar:
-    st.header("📝 注文の追加")
+    st.header("注文の追加")
     
     select_options = ["(場所を選択)"] + list(LOCATION_MASTER.keys()) + ["その他(手動入力)"]
     selected_loc = st.selectbox("配達先を選択", select_options)
@@ -76,13 +76,13 @@ with st.sidebar:
     if st.button("リストに追加", type="primary"):
         if input_loc and selected_loc != "(場所を選択)":
             st.session_state.orders.append({"location": input_loc, "time": input_time})
-            st.success(f"「{input_loc}」を追加しました")
+            st.success(f"Add「{input_loc}」")
         else:
             st.error("場所を選択するか入力してください")
 
     st.divider()
     
-    st.header("⚙️ 体制設定")
+    st.header("設定")
     driver_count = st.slider("現在の配達員数", 1, 5, 2)
     
     if st.button("注文リストをクリア"):
@@ -91,7 +91,7 @@ with st.sidebar:
 
 # --- メインエリア：表示 ---
 
-st.subheader(f"📋 現在の注文スタック ({len(st.session_state.orders)}件)")
+st.subheader(f"現在の注文 ({len(st.session_state.orders)}件)")
 
 if st.session_state.orders:
     # リスト表示 (indexを1から表示)
@@ -106,13 +106,13 @@ if st.session_state.orders:
     st.divider()
     
     # 結果表示
-    st.subheader("⏱️ 計算されたご案内時間")
+    st.subheader("予測時間")
     
     col1, col2 = st.columns([1, 1.5])
     
     with col1:
         st.metric(
-            label="お客様への案内",
+            label="",
             value=f"{final_wait} 分",
             delta="最低30分保証" if final_wait == 30 and raw_calc < 30 else None,
             delta_color="off"
@@ -121,7 +121,7 @@ if st.session_state.orders:
     with col2:
         # 計算式の可視化
         st.info(f"""
-        **計算ロジック:**
+        **内訳:**
         $$
         ({avg_rt:.1f}\\text{{分}} \\times \\frac{{{len(st.session_state.orders)-1}\\text{{件}}}}{{{driver_count}\\text{{人}}}}) + {avg_rt/2:.1f}\\text{{分}} = {raw_calc:.1f}\\text{{分}}
         $$
@@ -132,5 +132,5 @@ if st.session_state.orders:
         """)
         
 else:
-    st.info("👈 左のサイドバーから注文を追加してください")
+    st.info("左のサイドバーから注文を追加")
     st.metric(label="お客様への案内", value="30 分")
