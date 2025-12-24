@@ -1,467 +1,137 @@
 import streamlit as st
-import math
 import pandas as pd
-import datetime
-from datetime import timedelta
-import uuid
 
 # ==========================================
-# 1. config, master
+# 0. マスタデータ設定 (ここを自由に編集してください)
 # ==========================================
-
-# 距離master
-LOCATION_DETAILS = {
-    # Zone_A
-    "鹿塩": {"zone": "Zone_A", "dist": 0.8},
-    "大吹": {"zone": "Zone_A", "dist": 1.1},
-    "亀井": {"zone": "Zone_A", "dist": 1.2},
-    "末成": {"zone": "Zone_A", "dist": 1.5},
-    "大成": {"zone": "Zone_A", "dist": 0.9},
-    "小林": {"zone": "Zone_A", "dist": 1.3},
-    "光明": {"zone": "Zone_A", "dist": 1.4},
-    "高司": {"zone": "Zone_A", "dist": 1.0},
-    "福井": {"zone": "Zone_A", "dist": 1.5},
-    "逆瀬川": {"zone": "Zone_A", "dist": 1.2},
-    # Zone_B
-    "段上(1~4)": {"zone": "Zone_B", "dist": 2.1},
-    "千種": {"zone": "Zone_B", "dist": 2.3},
-    "仁川": {"zone": "Zone_B", "dist": 2.5},
-    "仁川高台": {"zone": "Zone_B", "dist": 1.3},
-    "仁川高丸": {"zone": "Zone_B", "dist": 1.6},
-    "上甲東園": {"zone": "Zone_B", "dist": 2.2},
-    "甲東園": {"zone": "Zone_B", "dist": 2.4},
-    "安倉西": {"zone": "Zone_B", "dist": 1.6},
-    "安倉中": {"zone": "Zone_B", "dist": 2.6},
-    "西野": {"zone": "Zone_B", "dist": 1.5},
-    "中野西": {"zone": "Zone_B", "dist": 2.4},
-    "中野北": {"zone": "Zone_B", "dist": 2.3},
-    "末広": {"zone": "Zone_B", "dist": 1.6},
-    "中州": {"zone": "Zone_B", "dist": 1.8},
-    "野上(1~3)": {"zone": "Zone_B", "dist": 2.0},
-    # Zone_C
-    "仁川(5~6)": {"zone": "Zone_C", "dist": 2.2},
-    "上ヶ原": {"zone": "Zone_C", "dist": 3.0},
-    "上大市": {"zone": "Zone_C", "dist": 2.9},
-    "下大市": {"zone": "Zone_C", "dist": 3.5},
-    "段上(5~8)": {"zone": "Zone_C", "dist": 2.5},
-    "美座": {"zone": "Zone_C", "dist": 2.1},
-    "小浜": {"zone": "Zone_C", "dist": 3.5},
-    "弥生": {"zone": "Zone_C", "dist": 2.4},
-    "南口": {"zone": "Zone_C", "dist": 2.5},
-    "光が丘": {"zone": "Zone_C", "dist": 3.3},
-    "青葉台": {"zone": "Zone_C", "dist": 3.3},
-    "寿楽荘": {"zone": "Zone_C", "dist": 2.6},
-    "宝松苑": {"zone": "Zone_C", "dist": 2.6},
-    "逆瀬台": {"zone": "Zone_C", "dist": 3.0},
-    "野上(4~6)": {"zone": "Zone_C", "dist": 3.5},
-    # Zone_D
-    "長寿が丘": {"zone": "Zone_D", "dist": 4.4},
-    "月見山": {"zone": "Zone_D", "dist": 4.2},
+# "地名": 標準往復時間(分)
+LOCATION_MASTER = {
+    "A地区 (近隣)": 15,
+    "B地区 (標準)": 30,
+    "C地区 (遠方)": 45,
+    "Dマンション": 25,
+    "E駅前ビル": 35,
+    "F団地": 50
 }
 
-WEATHER_CONFIG = {
-    "晴": {"speed": 1.0, "stack": 1.0},
-    "雨": {"speed": 0.8, "stack": 0.8}
-}
-
-# 平均時速(km/h)
-BASE_SPEED_KMH = 17.25
-
 # ==========================================
-# 2. セッション状態管理
+# 1. セッション状態の初期化
 # ==========================================
 if 'orders' not in st.session_state:
     st.session_state.orders = []
 
-def get_current_time():
-    """現在時刻を取得（秒以下切り捨て）"""
-    return datetime.datetime.now().replace(second=0, microsecond=0)
-
-def add_order(type, count, location, note, target_time_dt, is_reservation):
-    """注文をスタックに追加"""
-    st.session_state.orders.append({
-        "id": str(uuid.uuid4())[:8],
-        "created_at": get_current_time(),
-        "target_time": target_time_dt, 
-        "is_reservation": is_reservation,
-        "type": type,
-        "count": count,
-        "location": location,
-        "note": note,
-        "status": "active"
-    })
-
-def complete_order(order_id):
-    st.session_state.orders = [o for o in st.session_state.orders if o['id'] != order_id]
+# ==========================================
+# 2. 計算ロジック
+# ==========================================
+def calculate_wait_time(orders_list, driver_count):
+    if not orders_list:
+        return 30, 0, 0, 0
+    
+    times = [o["time"] for o in orders_list]
+    num_orders = len(times)
+    
+    avg_round_trip = sum(times) / num_orders
+    avg_one_way = avg_round_trip / 2
+    
+    # 回転数: (注文数 - 1) // ドライバー数
+    rounds_needed = (num_orders - 1) // driver_count
+    
+    # 計算式
+    raw_time = (rounds_needed * avg_round_trip) + avg_one_way
+    
+    # 最低保証 30分
+    final_time = max(30, raw_time)
+    
+    return int(final_time), avg_round_trip, rounds_needed, raw_time
 
 # ==========================================
-# 3. スタッキング計算
+# 3. UI構築
 # ==========================================
-def calculate_stack_schedule(new_orders_list, oven_count, bake_time, prep_time, driver_count_func, weather):
-    """
-    注文を「時間順」に並べ替え、オーブンと配送枠をシミュレーションする
-    """
-    current_time = get_current_time()
-    w_conf = WEATHER_CONFIG[weather]
-    
-    # 配達先での平均滞在時間（分）
-    DELIVERY_STAY_MIN = 4.0
-    
-    # ----------------------------------------------------
-    # (A) 現在の注文状況から「平均1回転時間（サイクル）」を動的計算
-    # ----------------------------------------------------
-    active_deliveries = [o for o in st.session_state.orders if o['type'] == 'Delivery']
-    
-    if active_deliveries:
-        total_round_trip_min = 0
-        current_speed = BASE_SPEED_KMH * w_conf["speed"]
-        
-        for o in active_deliveries:
-            loc_key = o['location']
-            dist = LOCATION_DETAILS.get(loc_key, {"dist": 1.0})['dist']
-            
-            # 片道移動時間
-            one_way_min = (dist / current_speed) * 60
-            
-            # 修正: 往復時間 = (片道 * 2) + 現地滞在時間(4分)
-            round_trip_min = (one_way_min * 2) + DELIVERY_STAY_MIN
-            total_round_trip_min += round_trip_min
-            
-        avg_cycle_time = total_round_trip_min / len(active_deliveries)
-        # 最低保証（近場往復でも15分+4分=19分はかかる想定）
-        avg_cycle_time = max(19.0, avg_cycle_time)
-    else:
-        # デリバリー注文がない場合：デフォルト30分 + 滞在4分
-        avg_cycle_time = 30.0 + DELIVERY_STAY_MIN
+st.title("🛵 リアルタイム待ち時間計算")
 
-    # ----------------------------------------------------
-    # (B) タスクの時系列ソート
-    # ----------------------------------------------------
-    all_tasks = []
-    # 既存オーダー
-    for o in st.session_state.orders:
-        all_tasks.append({**o, "is_new": False})
-    # 新規シミュレーション用
-    for new_o in new_orders_list:
-        sim_created = new_o.get('target_time') if new_o['is_reservation'] else current_time
-        all_tasks.append({**new_o, "created_at": sim_created, "is_new": True})
-
-    calc_tasks = []
-    prep_delta = timedelta(minutes=prep_time)
-    
-    for t in all_tasks:
-        if t['is_reservation']:
-            # 予約：希望時刻の30分前基準
-            start_base = t['target_time'] - timedelta(minutes=30)
-            priority_time = max(start_base, current_time)
-        else:
-            # 今すぐ：受注時刻基準
-            priority_time = t['created_at']
-        calc_tasks.append({**t, "priority_time": priority_time})
-    
-    calc_tasks.sort(key=lambda x: x['priority_time'])
-
-    # ----------------------------------------------------
-    # (C) オーブンシミュレーション
-    # ----------------------------------------------------
-    ovens = [current_time] * oven_count
-    oven_interval = timedelta(minutes=1) 
-    bake_duration = timedelta(minutes=bake_time)
-
-    simulation_results = {}
-    for task in calc_tasks:
-        task_finish_time = current_time 
-        for _ in range(task['count']):
-            earliest_idx = ovens.index(min(ovens))
-            oven_ready_time = ovens[earliest_idx]
-            # 投入可能時刻
-            entry_time = max(oven_ready_time, task['priority_time'] + prep_delta)
-            
-            ovens[earliest_idx] = entry_time + oven_interval
-            finish_time = entry_time + bake_duration
-            task_finish_time = max(task_finish_time, finish_time)
-            
-        simulation_results[task.get('id', 'SIMULATION')] = task_finish_time
-
-    # 結果取得
-    target_result = simulation_results.get('SIMULATION')
-    if not target_result:
-        return None, None
-
-    # ----------------------------------------------------
-    # (D) デリバリー配送シミュレーション
-    # ----------------------------------------------------
-    delivery_details = {}
-    total_finish_time = target_result
-    target_new = new_orders_list[0]
-
-    if target_new['type'] == "Delivery":
-        loc_key = target_new['location']
-        dist_km = LOCATION_DETAILS.get(loc_key, {"dist": 1.0})['dist']
-
-        speed = BASE_SPEED_KMH * w_conf["speed"]
-        travel_min = (dist_km / speed) * 60
-        
-        # ドライバー数と能力（焼き上がり時点のシフト人数を参照）
-        current_drivers = driver_count_func(total_finish_time)
-        per_driver = math.floor(1 * w_conf["stack"])
-        if per_driver < 1: per_driver = 1
-        
-        fleet_capa = current_drivers * per_driver
-        if fleet_capa < 1: fleet_capa = 1 
-
-        # 自分より前の待ち件数をカウント
-        prior_deliveries = len([t for t in calc_tasks 
-                                if t['type'] == 'Delivery' 
-                                and t['priority_time'] <= target_new.get('priority_time', current_time)
-                                and not t.get('is_new')])
-        
-        # 平均サイクルタイムを使って待ち時間を算出
-        unit_wait = avg_cycle_time / fleet_capa
-        wait_min = prior_deliveries * unit_wait
-        
-        # 到着予想時刻 = 焼き上がり + 配車待ち + 片道移動
-        total_finish_time += timedelta(minutes=wait_min + travel_min)
-        
-        delivery_details = {
-            "baked": target_result.strftime("%H:%M"),
-            "wait": int(wait_min),
-            "travel": int(travel_min),
-            "drivers": current_drivers,
-            "avg_cycle": int(avg_cycle_time)
-        }
-
-    return total_finish_time, delivery_details
-
-# ==========================================
-# 4. UI構築
-# ==========================================
-
-st.set_page_config(page_title="Pizza Delivery Manager", layout="wide")
-st.title("")
-
-# --- サイドバー設定（ドライバーシフト表） ---
+# --- サイドバー：入力エリア ---
 with st.sidebar:
-    st.header("環境設定")
-    weather = st.radio("天候", ["晴", "雨"], horizontal=True)
-    oven_count = st.slider("オーブン数", 1, 5, 2)
-    prep_time = st.number_input("準備時間(分)", 5, 60, 15)
-    bake_time = st.number_input("焼成時間(分)", 3.0, 15.0, 6.5)
+    st.header("📝 注文の追加")
     
-    st.divider()
-    st.subheader("配達員")
+    # 1. マスタから場所を選択
+    # "手動入力" という選択肢も追加しておきます
+    select_options = ["(場所を選択)"] + list(LOCATION_MASTER.keys()) + ["その他(手動入力)"]
     
-    # デフォルトのシフトデータ
-    default_schedule = pd.DataFrame({
-        "Hour": [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
-        "Drivers": [2, 3, 3, 2, 2, 2, 3, 4, 4, 3, 2, 1]
-    })
+    selected_loc = st.selectbox("配達先を選択", select_options)
     
-    edited_schedule = st.data_editor(
-        default_schedule, 
-        column_config={"Hour": st.column_config.NumberColumn(format="%d時")},
-        hide_index=True,
-        use_container_width=True
-    )
+    # 2. 選択に応じたデフォルト値の設定
+    default_name = ""
+    default_time = 30
     
-    # ドライバー数取得関数
-    def get_drivers_at_hour(dt_or_hour):
-        if isinstance(dt_or_hour, datetime.datetime):
-            h = dt_or_hour.hour
+    if selected_loc in LOCATION_MASTER:
+        default_name = selected_loc
+        default_time = LOCATION_MASTER[selected_loc]
+    elif selected_loc == "その他(手動入力)":
+        default_name = "" # 手動の場合は空欄スタート
+        default_time = 30
+    
+    # 3. 入力フォーム (デフォルト値を反映)
+    # ユーザーが名前や時間を微調整できるようにする
+    input_loc = st.text_input("地名・備考", value=default_name)
+    input_time = st.slider("往復にかかる時間 (分)", min_value=10, max_value=120, value=default_time, step=5)
+    
+    # 追加ボタン
+    if st.button("リストに追加", type="primary"):
+        if input_loc and selected_loc != "(場所を選択)":
+            st.session_state.orders.append({"location": input_loc, "time": input_time})
+            st.success(f"「{input_loc}」を追加しました")
         else:
-            h = int(dt_or_hour)
-        if h < 11 or h > 22:
-            return 1
-        row = edited_schedule[edited_schedule["Hour"] == h]
-        if not row.empty:
-            return int(row.iloc[0]["Drivers"])
-        return 1
-    
-    # 配送ペース確認（サイドバー下部）
+            st.error("場所を選択するか入力してください")
+
     st.divider()
-    st.markdown("**現在の配送ペース**")
     
-    active_dels = [o for o in st.session_state.orders if o['type'] == 'Delivery']
-    if active_dels:
-        total_mins = 0
-        w_speed = BASE_SPEED_KMH * WEATHER_CONFIG[weather]["speed"]
-        
-        for o in active_dels:
-            d = LOCATION_DETAILS.get(o['location'], {"dist": 1.0})['dist']
-            # 移動(往復) + 滞在(4分)
-            total_mins += (((d / w_speed) * 60) * 2) + 4.0
-            
-        avg_pac = int(total_mins / len(active_dels))
-        st.caption(f"平均往復: 約 {max(19, avg_pac)} 分 / 件")
-        st.caption(f"{len(active_dels)}件の平均")
-    else:
-        st.caption("平均往復: 30 分 (デフォルト)")
-
-# --- (iii) 未来の時間帯別 待ち時間予測ボード ---
-st.markdown("### 予測待ち時間")
-
-# 現在時刻を取得
-current_h = get_current_time().hour
-
-# スライダーのデフォルト値を計算
-default_start = max(11, current_h)
-default_end = min(22, default_start + 5)
-
-# 1. 範囲選択スライダー
-selected_range = st.slider(
-    "表示する時間帯を選択",
-    min_value=11, 
-    max_value=22, 
-    value=(default_start, default_end), 
-    format="%d時"
-)
-
-start_view, end_view = selected_range
-
-# 2. 選択された範囲でループ表示
-cols = st.columns(6)
-count = 0
-
-for h in range(start_view, end_view + 1):
-    # その時間の仮注文データを作成
-    target_dt = get_current_time().replace(hour=h, minute=0)
+    # 体制設定
+    st.header("⚙️ 体制設定")
+    driver_count = st.slider("現在の配達員数", 1, 5, 2)
     
-    # 過去の時間なら現在時刻として計算
-    if target_dt < get_current_time():
-        target_dt = get_current_time()
+    # クリアボタン
+    if st.button("注文リストをクリア"):
+        st.session_state.orders = []
+        st.rerun()
 
-    # 仮のデリバリー注文（標準的な場所: 鹿塩）
-    dummy_del = {
-        "type": "Delivery", "count": 1, "location": "鹿塩", 
-        "target_time": target_dt, "is_reservation": True
-    }
+# --- メインエリア：表示 ---
+
+st.subheader(f"📋 現在の注文スタック ({len(st.session_state.orders)}件)")
+
+if st.session_state.orders:
+    # リスト表示
+    df = pd.DataFrame(st.session_state.orders)
+    df.columns = ["配達先", "往復時間(分)"]
+    # インデックスを1から開始して表示
+    df.index = df.index + 1
+    st.dataframe(df, use_container_width=True)
     
     # 計算実行
-    fin_dt, dets = calculate_stack_schedule(
-        [dummy_del], oven_count, bake_time, prep_time, get_drivers_at_hour, weather
-    )
+    final_wait, avg_rt, rounds, raw_calc = calculate_wait_time(st.session_state.orders, driver_count)
     
-    if fin_dt:
-        # 待ち時間（分）
-        wait_m = math.ceil((fin_dt - target_dt).total_seconds() / 60)
-        # 最低保証30分
-        disp_wait = max(30, wait_m)
-        
-        # ドライバー数
-        d_num = get_drivers_at_hour(h)
-        
-        # 色分け
-        delta_color = "normal"
-        if disp_wait > 60: 
-            delta_color = "inverse"
-        
-        with cols[count % 6]:
-            st.metric(
-                label=f"{h}:00", 
-                value=f"{disp_wait}分", 
-                delta=f"{d_num}人",
-                delta_color=delta_color
-            )
-    else:
-        with cols[count % 6]:
-            st.metric(f"{h}:00", "ー")
-            
-    count += 1
-
-st.divider()
-
-# --- 通常の注文入力画面 ---
-
-col_main, col_list = st.columns([1.2, 1.5])
-
-with col_main:
-    st.subheader("新規注文入力")
+    st.divider()
     
-    with st.container(border=True):
-        order_mode = st.radio("受付タイプ", ["今すぐ", "予約"], horizontal=True)
-        
-        target_dt = get_current_time()
-        
-        if order_mode == "予約":
-            col_t1, col_t2 = st.columns(2)
-            res_date = col_t1.date_input("日付", datetime.date.today())
-            res_time = col_t2.time_input("希望時刻", (get_current_time() + timedelta(minutes=60)).time())
-            target_dt = datetime.datetime.combine(res_date, res_time)
-        
-        order_type = st.selectbox("受取方法", ["Takeout", "Delivery"])
-        
-        c1, c2 = st.columns(2)
-        count = c1.number_input("枚数", 1, 20, 1)
-        loc = "鹿塩" # default
-        
-        dist_display = ""
-        if order_type == "Delivery":
-            loc = c2.selectbox("お届け先", list(LOCATION_DETAILS.keys()))
-            dist_val = LOCATION_DETAILS[loc]['dist']
-            dist_display = f"({dist_val}km)"
-        else:
-            note = c2.text_input("顧客名/メモ", "様")
-
-        # --- 個別シミュレーション ---
-        sim_order = {
-            "type": order_type, 
-            "count": count, 
-            "location": loc, 
-            "target_time": target_dt, 
-            "is_reservation": (order_mode == "予約")
-        }
-        
-        finish_dt, details = calculate_stack_schedule(
-            [sim_order], oven_count, bake_time, prep_time, get_drivers_at_hour, weather
+    # 結果表示
+    st.subheader("⏱️ 計算されたご案内時間")
+    
+    col1, col2 = st.columns([1, 1.5])
+    
+    with col1:
+        st.metric(
+            label="お客様への案内",
+            value=f"{final_wait} 分",
+            delta="最低30分保証" if final_wait == 30 and raw_calc < 30 else None,
+            delta_color="off"
         )
-        
-        # 待ち時間表示
-        wait_min_actual = int((finish_dt - target_dt).total_seconds()/60)
-        
-        st.markdown(f"**完了予定:** `{finish_dt.strftime('%H:%M')}` {dist_display}")
-        
-        if order_mode == "予約":
-            if finish_dt <= target_dt:
-                st.success(f"予約OK (余裕 {abs(wait_min_actual)}分)")
-            else:
-                st.error(f"遅延見込み (+{wait_min_actual}分)")
-        else:
-            # 今すぐ注文
-            st.info(f"予想待ち時間: 約 {max(0, wait_min_actual)} 分")
-
-        if st.button("Add Order", type="primary", use_container_width=True):
-            add_order(order_type, count, loc, 
-                      note if order_type=="Takeout" else f"配送: {loc}", 
-                      target_dt, (order_mode == "予約"))
-            st.success("注文を追加しました")
-            st.rerun()
-
-with col_list:
-    st.subheader("現在の注文")
     
-    if st.session_state.orders:
-        orders = st.session_state.orders
-        total_pizzas = sum(o['count'] for o in orders)
-        st.caption(f"待機: {len(orders)}件 / ピザ残: {total_pizzas}枚")
+    with col2:
+        st.info(f"""
+        **計算ロジックの内訳:**
+        - 平均往復時間: **{avg_rt:.1f}** 分
+        - 必要回転数: **{rounds}** 回 ({(len(st.session_state.orders)-1)}件待ち ÷ {driver_count}人)
+        - 計算値: ({rounds}回 × {avg_rt:.1f}分) + {avg_rt/2:.1f}分 = **{raw_calc:.1f}** 分
+        """)
         
-        # 表示用にソート
-        display_list = []
-        for o in orders:
-            p_time = o['created_at']
-            if o['is_reservation']:
-                p_time = max(o['target_time'] - timedelta(minutes=30), get_current_time())
-            display_list.append({**o, "sort_key": p_time})
-            
-        display_list.sort(key=lambda x: x['sort_key'])
-        
-        for o in display_list:
-            
-            time_str = o['target_time'].strftime('%H:%M') if o['is_reservation'] else o['created_at'].strftime('%H:%M')
-            #icon = "📅" if o['is_reservation'] else "⚡"
-            with st.expander(f"{time_str} | {o['count']}枚 ({o['type']})"):
-                st.write(f"内容: {o['note'] if o['type']=='Takeout' else o['location']}")
-                if st.button("完了", key=o['id']):
-                    complete_order(o['id'])
-                    st.rerun()
-    else:
-        st.info("No Active Orders")
+else:
+    st.info("👈 左のサイドバーから注文を追加してください")
+    st.metric(label="お客様への案内", value="30 分")
